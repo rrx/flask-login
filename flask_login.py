@@ -34,6 +34,10 @@ def _cookie_digest(payload, key=None):
     mac = hmac.new(key, payload, sha1)
     return mac.hexdigest()
 
+def _quick_hash(msg):
+    hsh = md5()
+    hsh.update(msg.encode("utf8"))
+    return hsh.hexdigest()
 
 def encode_cookie(payload):
     """
@@ -42,7 +46,8 @@ def encode_cookie(payload):
 
     :param payload: The value to encode, as `unicode`.
     """
-    return u"%s|%s" % (payload, _cookie_digest(payload))
+    hashed_payload = _quick_hash(payload)
+    return u"%s|%s" % (hashed_payload, _cookie_digest(hashed_payload))
 
 
 def decode_cookie(cookie):
@@ -188,6 +193,7 @@ class LoginManager(object):
         #: ``"basic"`` (the default) or ``"strong"``, or `None` to disable it.
         self.session_protection = "basic"
         self.token_callback = None
+        self.events_callback = None
         self.user_callback = None
         self.unauthorized_callback = None
         self.needs_refresh_callback = None
@@ -271,6 +277,8 @@ class LoginManager(object):
         otherwise the redirect will have no effect.
         """
         user_unauthorized.send(current_app._get_current_object())
+        if self.events_callback:
+            self.events_callback(event='unauthorized')
         if self.unauthorized_callback:
             return self.unauthorized_callback()
         if not self.login_view:
@@ -317,6 +325,18 @@ class LoginManager(object):
         flash(self.needs_refresh_message, category=self.needs_refresh_message_category)
         return redirect(login_url(self.refresh_view, request.url))
 
+    def events_handler(self,callback):
+        """
+        General handler for all events that occur related to login
+        For notification purposes only!
+
+        Callback takes keyword arguments only
+
+        :param callback: The callback for events
+        """
+        self.events_callback = callback
+        return callback
+
     def _load_user(self):
         if (current_app.static_url_path is not None and
             request.path.startswith(current_app.static_url_path)
@@ -335,6 +355,8 @@ class LoginManager(object):
         cookie_name = config.get("REMEMBER_COOKIE_NAME", COOKIE_NAME)
         if cookie_name in request.cookies and "user_id" not in session:
             self._load_from_cookie(request.cookies[cookie_name])
+            if self.events_callback:
+                self.events_callback(event='remembered')
         else:
             self.reload_user()
 
@@ -402,6 +424,9 @@ class LoginManager(object):
         cookie_name = config.get("REMEMBER_COOKIE_NAME", COOKIE_NAME)
         duration = config.get("REMEMBER_COOKIE_DURATION", COOKIE_DURATION)
         domain = config.get("REMEMBER_COOKIE_DOMAIN", None)
+        secure = config.get("LOGIN_COOKIE_SECURE", None)
+        httponly = config.get("LOGIN_COOKIE_HTTPONLY", False)
+
         # prepare data
         if self.token_callback:
             data = current_user.get_auth_token()
@@ -409,7 +434,8 @@ class LoginManager(object):
             data = encode_cookie(str(session["user_id"]))
         expires = datetime.utcnow() + duration
         # actually set it
-        response.set_cookie(cookie_name, data, expires=expires, domain=domain)
+        response.set_cookie(cookie_name, data, expires=expires, domain=domain,
+                            secure=secure, httponly=httponly)
 
     def _clear_cookie(self, response):
         config = current_app.config
