@@ -22,6 +22,7 @@ from werkzeug.urls import url_decode, url_encode
 
 _signals = Namespace()
 
+SECURE = False
 
 def _get_user():
     return getattr(_request_ctx_stack.top, "user", None)
@@ -46,9 +47,9 @@ def encode_cookie(payload):
 
     :param payload: The value to encode, as `unicode`.
     """
-    hashed_payload = _quick_hash(payload)
-    return u"%s|%s" % (hashed_payload, _cookie_digest(hashed_payload))
-
+    if SECURE:
+        payload = _quick_hash(payload)
+    return u"%s|%s" % (payload, _cookie_digest(payload))
 
 def decode_cookie(cookie):
     """
